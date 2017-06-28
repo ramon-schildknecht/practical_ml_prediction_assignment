@@ -1,0 +1,246 @@
+---
+title: "Prediction Assignment"
+author: "Ramon Schildknecht"
+date: "6/28/2017"
+output: html_document
+---
+
+
+#Summary
+The goal of this assignment is to predict one of five exercice classes respectively executions types according to test attendants movements. The exercice is called [Unilateral Dumbbell Biceps Curl](https://www.youtube.com/watch?v=nD5kstcESZ0). The links leads to a video that shows you the ideal movement.
+
+We took the 3 most common model methods to solve the problem. The method with the best accuracy was Random Forest with a accuracy of 99.8%.
+
+The model predicted 20 classes out of 20 from the given test dataset.
+\newline
+\newline
+\newline
+
+#Overview
+You will find the complete task description [here](https://www.evernote.com/l/Ai-5Q3ehW1BHjJOkY2Zus1q2KzCKfpWrkqQ). You can find the used data there.
+
+The goal is mentioned in the summary above.
+\newline
+\newline
+\newline
+
+#Data description
+There is a training set (20 observations) and a test set (19622 observations), each containing 160 variables. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+You will find data details [here](http://groupware.les.inf.puc-rio.br/har) in the section "Weight Lifting Exercises Dataset". 
+
+I thank Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. a lot for providing the valueable data. Their publication can be found [here](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335).
+\newline
+\newline
+\newline
+
+#Preparation
+
+## Loading packages & set seed
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(easypackages)
+my.packages <- c("readr","knitr", "caret", "corrplot", "rpart", "rpart.plot", "randomForest", "data.table", "gbm", "plyr")
+libraries(my.packages)
+set.seed(55555) 
+```
+\newline
+\newline
+
+##Load necessary data
+```{r, message=FALSE, results='hide', warning=FALSE} 
+d.training <- data.frame(read_csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"))
+d.test <- data.frame(read_csv("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"))
+```
+\newline
+\newline
+
+##Split training set
+
+```{r}
+split.training <- createDataPartition(d.training$classe, p=0.7, list=FALSE)
+training.set <- d.training[split.training, ]
+testing.set  <- d.training[-split.training, ]
+training.set$classe <- na.omit(training.set$classe)
+dim.training <- dim(training.set)
+dim.test <- dim(testing.set)
+(dim.all <- data.table(dim.training, dim.test)) #first line = rowcounts, second line = columncounts 
+```
+
+There are 160 variables in both data subsets.
+\newline
+\newline
+
+##Data Cleaning
+
+There are a lot of [Near-zero variance (nzv) variables](https://tgmstat.wordpress.com/2014/03/06/near-zero-variance-predictors/). Therefore we remove them.
+
+```{r}
+nzv <- nearZeroVar(training.set)
+training.set <- training.set[, -nzv]
+testing.set <- testing.set[, -nzv]
+dim.training <- dim(training.set)
+dim.test <- dim(testing.set)
+(dim.all <- data.table(dim.training, dim.test))
+```
+
+Check for missing values
+
+```{r}
+mean(is.na(training.set))
+mean(is.na(testing.set))
+```
+
+There are a lot of overall missing values (> 50%) in the data sets.
+
+We remove variables with count of missing values greater than 90% and remove remaining NA values. 
+
+```{r}
+all.nas    <- sapply(training.set, function(x) mean(is.na(x))) > 0.90
+training.set <- training.set[, all.nas==FALSE]
+testing.set  <- testing.set[, all.nas==FALSE]
+training.set <- na.omit(training.set)
+dim.training <- dim(training.set)
+dim.test <- dim(testing.set)
+(dim.all <- data.table(dim.training, dim.test))
+```
+
+In a last step we remove the first five ID variables that are not relevant as feature.
+
+```{r}
+training.set <- training.set[, -(1:5)]
+testing.set <- testing.set[, -(1:5)]
+dim.training <- dim(training.set)
+dim.test <- dim(testing.set)
+(dim.all <- data.table(dim.training, dim.test))
+```
+
+We reduced our count of variables from 160 to 54 in the cleaning process.
+\newline
+\newline
+
+#Exploratory Data Analysis
+
+##Correlations
+We check for correlations and ignore target Variable.
+
+```{r}
+correlation.matrix <- cor(training.set[, -54])
+corrplot(correlation.matrix, order = "FPC",             method = "color", type = "lower",              tl.cex = 0.3, tl.col = rgb(0, 0, 0))
+
+
+```
+
+
+We see in the visualization that the dark red and dark blue values are highly correlated. We have a lot of strong correlations. That is why we do not dive deeper with a principal component analysis. 
+\newline
+\newline
+
+#Machine Learning Models
+
+We will build three models with different methods from our cleaned training data set. Afterwards we use the one method performing the highest accuracy in the test dataset.  
+
+The three methods are:
+1. Generalized Boosted Model
+2. Decision Three
+3. Random Forests 
+
+##Method Generalized Boosted Model
+```{r}
+#fit model
+set.seed(55555)
+control.gbm <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mod.fit.gbm  <- train(classe ~ ., data = training.set, method = "gbm", verbose = FALSE, trControl = control.gbm)
+mod.fit.gbm$finalModel
+```
+
+
+```{r}
+#prediction on test data
+predict.gbm <- predict(mod.fit.gbm, newdata = testing.set)
+confusion.matrix.gbm <- confusionMatrix(predict.gbm, testing.set$classe)
+confusion.matrix.gbm
+```
+
+```{r}
+#show results
+plot(confusion.matrix.gbm$table, col = confusion.matrix.gbm$byClass, 
+     main = paste("Grad. Boost. M. Accuracy =", round(confusion.matrix.gbm$overall['Accuracy'], 3)))
+```
+\newline
+\newline
+\newline
+
+##Method Decision Three
+```{r}
+#fit model
+set.seed(55555)
+mod.fit.dt <- rpart(classe ~ ., data=training.set, method="class")
+plot(mod.fit.dt, uniform = TRUE, main = "Decision Three")
+text(mod.fit.dt, use.n = TRUE, all = TRUE, cex = .7)
+```
+```{r}
+#prediction on test data
+predict.dt <- predict(mod.fit.dt, newdata=testing.set, type="class")
+confusion.matrix.dt <- confusionMatrix(predict.dt, testing.set$classe)
+confusion.matrix.dt
+```
+
+```{r}
+#show results
+plot(confusion.matrix.dt$table, col = confusion.matrix.dt$byClass, 
+     main = paste("Decision Tree Accuracy =",
+                  round(confusion.matrix.dt$overall['Accuracy'],3)))
+```
+\newline
+\newline
+\newline
+
+##Method Random Forests
+```{r}
+#fit model
+set.seed(55555)
+control.rf <- trainControl(method="cv", number=3, verboseIter = FALSE)
+model.fit.rf <- train(classe ~ ., data = training.set, method="rf", trControl = control.rf)
+model.fit.rf$finalModel
+```
+
+```{r}
+#prediction on test data
+predict.rf <- predict(model.fit.rf, newdata = testing.set)
+confusion.matrix.rf <- confusionMatrix(predict.rf, testing.set$classe)
+confusion.matrix.rf
+```
+
+```{r}
+#show results
+plot(confusion.matrix.rf$table, col = confusion.matrix.rf$byClass, 
+     main = paste("Random Forest Accuracy =",
+     round(confusion.matrix.rf$overall['Accuracy'], 3)))
+```
+\newline
+\newline
+\newline
+
+#Compare model methods results on test data and decide for the best method
+
+We saw above the following 3 model accuracies:
+
+1. Generalized Boosted Model: 0.986   rank 2
+2. Decision Three:            0.727   rank 3
+3. Random Forests:            0.998   rank 1
+
+**The best method is Random Forests** and we apply it to answer the 20 quiz questions. We will see the results at the end of this document.
+
+```{r}
+predict.quiz <- predict(model.fit.rf, newdata  = d.test)
+intervall.1.to.20 <- 1:20
+data.table(intervall.1.to.20, predict.quiz)
+```
+
+
+
+
+
